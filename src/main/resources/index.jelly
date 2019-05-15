@@ -1,0 +1,7 @@
+<?jelly escape-by-default='true'?>
+<!--
+  This view is used to render the installed plugins page.
+-->
+<div>
+  This Plugin is a post build plugin to pass required information to quat.
+</div>
