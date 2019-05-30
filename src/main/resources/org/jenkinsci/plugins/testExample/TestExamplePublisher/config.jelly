@@ -17,4 +17,7 @@
   <f:entry title="Project" field="targetProject">
     <f:textbox />
   </f:entry>
+  <f:entry title="Execution type" field="executionType">
+    <f:textbox />
+  </f:entry>
 </j:jelly>

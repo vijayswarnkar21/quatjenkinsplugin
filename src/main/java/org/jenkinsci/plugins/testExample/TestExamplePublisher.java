@@ -14,6 +14,8 @@ import org.kohsuke.stapler.QueryParameter;
 import hudson.model.Result;
 import javax.servlet.ServletException;
 
+import static org.junit.Assume.assumeNoException;
+
 import java.io.File;
 import java.io.IOException;
 
@@ -51,13 +53,16 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
 
     private String filePath = " ";
     private final String targetProject;
+    private final String executionType;
+    ConsoleNotifier consoleNotifier = new ConsoleNotifier();
 
     // Fields in config.jelly must match the parameter names in the
     // "DataBoundConstructor"
     @DataBoundConstructor
-    public TestExamplePublisher(String filePath, String targetProject) {
+    public TestExamplePublisher(String filePath, String targetProject, String executionType) {
         this.filePath = filePath;
         this.targetProject = targetProject;
+        this.executionType = executionType;
     }
 
     public String getFilePath() {
@@ -70,67 +75,121 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
 
     @Override
     public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) {
-        ConsoleNotifier consoleNotifier = new ConsoleNotifier();
+
         try {
+            // variable declaration
             File testReportFile = null;
             FileBody testReportFileFileBody = null;
-            // steps
-            // 1.) Get id of the build
+            HttpClient client = HttpClientBuilder.create().build();
+
+            // get build id
             String build_id = build + " | " + (build.getId());
-            // 2.) Get file of build logs
+            // get build logs
             File build_logs = build.getLogFile();
-            // 3.) Get status of the build
+            // get build status
             String buildStatus = this.getBuildStatus(build);
-            // fetch file from the given location of test report file
+            // if filePath for test report is provided get the file
             if (filePath != "") {
                 testReportFile = new File(filePath);
             }
 
-            // create parameters that are to be passed with post api
-            FileBody buildLogsFileBody = new FileBody(build_logs, ContentType.DEFAULT_BINARY);
-            if (testReportFile != null) {
-                testReportFileFileBody = new FileBody(testReportFile, ContentType.DEFAULT_BINARY);
-            }
-            StringBody buildIdStringBody = new StringBody(build_id, ContentType.MULTIPART_FORM_DATA);
-            StringBody buildStatusStringBody = new StringBody(buildStatus, ContentType.MULTIPART_FORM_DATA);
-            StringBody targetProjectStringBody = new StringBody(targetProject, ContentType.MULTIPART_FORM_DATA);
-            StringBody tokenStringBody = new StringBody(getDescriptor().getToken(), ContentType.MULTIPART_FORM_DATA);
+            // call teamile api to get all the build data saved into database, and get
+            // buildId
+            HttpResponse buildApiResponse = saveBuildInformationAndGetBuildId(build_logs, build_id, buildStatus,
+                    targetProject, client);
 
-            MultipartEntityBuilder builder = MultipartEntityBuilder.create();
-            builder.setMode(HttpMultipartMode.BROWSER_COMPATIBLE);
-            builder.addPart("buildLogFile", buildLogsFileBody);
-            if (testReportFileFileBody != null) {
-                builder.addPart("reportfile", testReportFileFileBody);
-            }
-            builder.addPart("buildId", buildIdStringBody);
-            builder.addPart("buildStatus", buildStatusStringBody);
-            builder.addPart("project", targetProjectStringBody);
-            builder.addPart("token", tokenStringBody);
-
-            HttpEntity entity = builder.build();
-
-            HttpPost request = new HttpPost(getDescriptor().getQuatApi());
-            request.setEntity(entity);
-
-            HttpClient client = HttpClientBuilder.create().build();
-
-            HttpResponse response = client.execute(request);
-            if(response.getStatusLine().toString().contains("500")){
-                consoleNotifier.logger(listener, "There was an error while running quat post build plugin");
-                HttpEntity responseEntity= response.getEntity();
-
-                // Read the contents of an entity and return it as a String.
-                String content = EntityUtils.toString(responseEntity);
-                consoleNotifier.logger(listener, content);
+            boolean isSuccess = logApiCallErrorToJenkinsConsole(listener, buildApiResponse);
+            if (!isSuccess) {
                 return false;
             }
-            
-            return true;
+
+            // if testReportFile is available call the teamile api to get all testreport
+            // information parsed
+            if (testReportFile != null) {
+                if (executionType != null) {
+                    HttpResponse testReportApiResponse = getTestReportFileParsed(testReportFile, buildApiResponse.id,
+                            targetProject, executionType, client);
+
+                    return logApiCallErrorToJenkinsConsole(listener, testReportApiResponse);
+                }else {
+                    consoleNotifier.logger(listener, "executionType is a required field without this test report file can not be parsed");
+                }
+
+            } else {
+                return true;
+            }
+
         } catch (Exception iOException) {
             consoleNotifier.logger(listener, iOException.getMessage());
             return false;
         }
 
+    }
+
+    boolean logApiCallErrorToJenkinsConsole(BuildListener listener, HttpResponse response) throws IOException {
+        if (response.getStatusLine().toString().contains("500")) {
+            consoleNotifier.logger(listener, "There was an error while running quat post build plugin");
+            HttpEntity responseEntity = response.getEntity();
+
+            // Read the contents of an entity and return it as a String.
+            String content = EntityUtils.toString(responseEntity);
+            consoleNotifier.logger(listener, content);
+            return false;
+        } else {
+            return true;
+        }
+
+    }
+
+    HttpResponse saveBuildInformationAndGetBuildId(File build_logs, String build_id, String buildStatus,
+            String targetProject, HttpClient client) throws IOException {
+
+        FileBody buildLogsFileBody = new FileBody(build_logs, ContentType.DEFAULT_BINARY);
+        StringBody buildIdStringBody = new StringBody(build_id, ContentType.MULTIPART_FORM_DATA);
+        StringBody buildStatusStringBody = new StringBody(buildStatus, ContentType.MULTIPART_FORM_DATA);
+        StringBody targetProjectStringBody = new StringBody(targetProject, ContentType.MULTIPART_FORM_DATA);
+        StringBody tokenStringBody = new StringBody(getDescriptor().getToken(), ContentType.MULTIPART_FORM_DATA);
+
+        MultipartEntityBuilder builder = MultipartEntityBuilder.create();
+        builder.setMode(HttpMultipartMode.BROWSER_COMPATIBLE);
+        builder.addPart("buildLogFile", buildLogsFileBody);
+        builder.addPart("buildId", buildIdStringBody);
+        builder.addPart("buildStatus", buildStatusStringBody);
+        builder.addPart("project", targetProjectStringBody);
+        builder.addPart("token", tokenStringBody);
+
+        HttpEntity entity = builder.build();
+
+        HttpPost buildRequest = new HttpPost(getDescriptor().getQuatBuildApi());
+        buildRequest.setEntity(entity);
+
+        HttpResponse buildResponse = client.execute(buildRequest);
+        return buildResponse;
+    }
+
+    HttpResponse getTestReportFileParsed(File testReportFile, int responseBuildId, String targetProject,
+            String executionType, HttpClient client) throws IOException {
+        MultipartEntityBuilder testReportbuilder = MultipartEntityBuilder.create();
+        testReportbuilder.setMode(HttpMultipartMode.BROWSER_COMPATIBLE);
+
+        StringBody tokenStringBody = new StringBody(getDescriptor().getToken(), ContentType.MULTIPART_FORM_DATA);
+        StringBody responseBuildIdStringBody = new StringBody(String.format("%d", responseBuildId),
+                ContentType.MULTIPART_FORM_DATA);
+        StringBody executionTypeStringBody = new StringBody(executionType, ContentType.MULTIPART_FORM_DATA);
+        FileBody testReportFileFileBody = new FileBody(testReportFile, ContentType.DEFAULT_BINARY);
+        StringBody targetProjectStringBody = new StringBody(targetProject, ContentType.MULTIPART_FORM_DATA);
+
+        testReportbuilder.addPart("reportfile", testReportFileFileBody);
+        testReportbuilder.addPart("buildId", responseBuildIdStringBody);
+        testReportbuilder.addPart("executionTitle", executionTypeStringBody);
+        testReportbuilder.addPart("token", tokenStringBody);
+        testReportbuilder.addPart("project", targetProjectStringBody);
+
+        HttpEntity testReportentity = testReportbuilder.build();
+        HttpPost testReportRequest = new HttpPost(getDescriptor().getQuatTestReportApi());
+        testReportRequest.setEntity(testReportentity);
+        HttpResponse testReportResponse = client.execute(testReportRequest);
+        return testReportResponse;
     }
 
     /**
@@ -184,8 +243,9 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
          * <p/>
          * If you don't want fields to be persisted, use <tt>transient</tt>.
          */
-        private String quatApi;
+        private String quatBuildApi;
         private String token;
+        private String quatTestReportApi;
 
         /**
          * In order to load the persisted global configuration, you have to call load()
@@ -195,8 +255,12 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
             load();
         }
 
-        public String getQuatApi() {
-            return quatApi;
+        public String getQuatBuildApi() {
+            return quatBuildApi;
+        }
+
+        public String getQuatTestReportApi() {
+            return quatTestReportApi;
         }
 
         public String getToken() {
@@ -235,7 +299,7 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
         public boolean configure(StaplerRequest req, JSONObject formData) throws FormException {
             // To persist global configuration information,
             // set that to properties and call save().
-            quatApi = formData.getString("quatApi");
+            quatBuildApi = formData.getString("quatBuildApi");
             token = formData.getString("token");
             // ^Can also use req.bindJSON(this, formData);
             // (easier when there are many fields; need set* methods for this, like
