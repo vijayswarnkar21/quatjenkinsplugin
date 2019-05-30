@@ -81,6 +81,7 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
             File testReportFile = null;
             FileBody testReportFileFileBody = null;
             HttpClient client = HttpClientBuilder.create().build();
+            int responseBuildId = 0;
 
             // get build id
             String build_id = build + " | " + (build.getId());
@@ -100,24 +101,33 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
 
             boolean isSuccess = logApiCallErrorToJenkinsConsole(listener, buildApiResponse);
             if (!isSuccess) {
-                return false;
+                return isSuccess;
+            }else{
+                HttpEntity responseEntity = buildApiResponse.getEntity();
+                String buildResponse = EntityUtils.toString(responseEntity);
+                JSONObject jsonObject = JSONObject.fromObject(buildResponse);
+                responseBuildId = Integer.parseInt(jsonObject.getString("result"));
+
             }
 
             // if testReportFile is available call the teamile api to get all testreport
             // information parsed
             if (testReportFile != null) {
-                if (executionType != null) {
-                    HttpResponse testReportApiResponse = getTestReportFileParsed(testReportFile, buildApiResponse.id,
+                if (executionType.trim() != "") {
+                   
+                    HttpResponse testReportApiResponse = getTestReportFileParsed(testReportFile, responseBuildId,
                             targetProject, executionType, client);
 
                     return logApiCallErrorToJenkinsConsole(listener, testReportApiResponse);
                 }else {
                     consoleNotifier.logger(listener, "executionType is a required field without this test report file can not be parsed");
+                    return true;
                 }
 
             } else {
                 return true;
             }
+            
 
         } catch (Exception iOException) {
             consoleNotifier.logger(listener, iOException.getMessage());
@@ -301,6 +311,7 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
             // set that to properties and call save().
             quatBuildApi = formData.getString("quatBuildApi");
             token = formData.getString("token");
+            quatTestReportApi = formData.getString("quatTestReportApi");
             // ^Can also use req.bindJSON(this, formData);
             // (easier when there are many fields; need set* methods for this, like
             // setUseFrench)
