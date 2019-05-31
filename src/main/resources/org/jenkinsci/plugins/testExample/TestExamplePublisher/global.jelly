@@ -12,12 +12,12 @@
     tags they use. Views are always organized according to its owner class,
     so it should be straightforward to find them.
   -->
-  <f:section title="Quat">
-    <f:entry title="Build App URL" field="quatBuildApi"
-      description="Quat Build api url">
+  <f:section title="Teamile">
+    <f:entry title="Teamile Build api URL" field="quatBuildApi"
+      description="Teamile Build api url">
       <f:textbox />
     </f:entry>
-    <f:entry title="Report App URL" field="quatTestReportApi"
+    <f:entry title="Teamile testReport App URL" field="quatTestReportApi"
       description="Quat test report api url">
       <f:textbox />
     </f:entry>
