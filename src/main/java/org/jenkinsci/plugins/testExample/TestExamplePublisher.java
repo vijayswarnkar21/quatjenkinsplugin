@@ -73,6 +73,10 @@ public class TestExamplePublisher extends hudson.tasks.Recorder implements hudso
         return targetProject;
     }
 
+    public String getExecutionType() {
+        return executionType;
+    }
+
     @Override
     public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) {
 
