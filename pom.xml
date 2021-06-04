@@ -73,7 +73,7 @@
 <dependency>
     <groupId>org.apache.httpcomponents</groupId>
     <artifactId>httpclient</artifactId>
-    <version>4.5.3</version>
+    <version>4.5.13</version>
 </dependency>
 <!-- http://repo1.maven.org/maven2/org/apache/httpcomponents/httpmime/4.5.3/httpmime-4.5.3.jar -->
 <dependency>
